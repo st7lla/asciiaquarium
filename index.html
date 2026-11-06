@@ -1,0 +1,291 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ASCII Ocean — 3D Swimming Aquarium</title><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:#a9d9e8;font-family:ui-monospace,Menlo,monospace}canvas{display:block;position:absolute;inset:0;width:100%;height:100%}#hud{position:absolute;left:22px;bottom:18px;z-index:4;pointer-events:none;opacity:.72;font-size:11px;letter-spacing:.12em}#hud b{font-size:14px;color:#d9faff}#ui{position:absolute;right:18px;top:17px;z-index:4;display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;max-width:360px}button{background:#06131bba;border:1px solid #24546a;color:#b5e8fa;border-radius:20px;padding:8px 11px;cursor:pointer;font:11px Menlo,monospace}button:hover{border-color:#8eeaff}#error{position:absolute;top:48%;width:100%;text-align:center;color:#ffb49e;z-index:5}</style></head><body><script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js';
+const W=()=>innerWidth,H=()=>innerHeight;
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,preserveDrawingBuffer:false});renderer.setPixelRatio(Math.min(devicePixelRatio,1.65));renderer.setSize(W(),H());renderer.setClearColor(0x000000);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);renderer.domElement.style.visibility='hidden';
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x000000);const camera=new THREE.PerspectiveCamera(37,W()/H(),.1,150);camera.position.set(0,0,18.5);
+scene.add(new THREE.AmbientLight(0x89c9ff,1.4));let key=new THREE.PointLight(0x34d9ff,100,35);key.position.set(-5,7,9);scene.add(key);let fill=new THREE.PointLight(0xf056ff,65,30);fill.position.set(6,-4,5);scene.add(fill);
+const rt=new THREE.WebGLRenderTarget(1,1,{depthBuffer:true});
+const output=document.createElement('canvas');output.id='ascii';document.body.append(output);const ctx=output.getContext('2d',{alpha:false});let cells=4.0,glowing=true,playing=true,t=0,mouse={x:0,y:0};
+const chars=' .·,:;-=+*ox%#@';const special='0123456789+×<>[]{}';const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const mat=(color,opacity=1)=>new THREE.MeshPhysicalMaterial({color,emissive:color,emissiveIntensity:.30,metalness:.18,roughness:.31,transparent:opacity<1,opacity,side:THREE.DoubleSide,depthWrite:opacity>=1,clearcoat:.7,clearcoatRoughness:.22});
+function sphere(parent,x,y,z,sx,sy,sz,color,opacity=1){const m=new THREE.Mesh(new THREE.SphereGeometry(1,20,14),mat(color,opacity));m.position.set(x,y,z);m.scale.set(sx,sy,sz);parent.add(m);return m;}
+function fin(parent,points,color,opacity=.86){const shape=new THREE.Shape();shape.moveTo(points[0][0],points[0][1]);for(let i=1;i<points.length;i++){
+ const p=points[i],prev=points[i-1];
+ if(i<points.length-1){
+  const next=points[i+1];
+  shape.quadraticCurveTo(p[0],p[1],(p[0]+next[0])*.5,(p[1]+next[1])*.5);
+ }else shape.lineTo(p[0],p[1]);
+}shape.closePath();const geo=new THREE.ExtrudeGeometry(shape,{depth:.18,bevelEnabled:true,bevelThickness:.075,bevelSize:.055,bevelSegments:3,steps:1,curveSegments:12});const m=new THREE.Mesh(geo,mat(color,opacity));m.position.z=-.09;parent.add(m);return m;}
+function tube(parent,pts,r,color,opacity=.75){let curve=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p)));const m=new THREE.Mesh(new THREE.TubeGeometry(curve,24,r,5,false),mat(color,opacity));parent.add(m);return m;}
+function whisker(parent,pts,color,r=.012){return tube(parent,pts,r,color,.9)}
+function eye(parent,x,y,z,r=.07){
+ sphere(parent,x,y,z,r,r,.045,0xd8ffff);
+ sphere(parent,x+.014,y,z+(z>0?.037:-.037),r*.40,r*.40,.022,0x122947);
+}
+function ribs(parent,pts,color,count=8){
+ for(let i=0;i<count;i++){
+  const x=pts[0]+i*(pts[1]-pts[0])/(count-1);
+  whisker(parent,[[x,pts[2],.04],[x+.12,pts[3],.055]],color,.008);
+ }
+}
+function fish(type,color,accent,scale=1){const root=new THREE.Group();root.scale.setScalar(scale);const body=new THREE.Group();root.add(body);let tail=new THREE.Group();body.add(tail);let fins=[];
+if(type==='shark'){
+ // Readable shark silhouette: solid fusiform body, tall dorsal, unmistakable crescent tail.
+ sphere(body,.05,0,0,1.30,.43,.44,color);
+ sphere(body,.91,-.045,0,.76,.29,.32,color);
+ sphere(body,1.52,-.065,0,.36,.17,.19,color);
+ // Distinct dorsal fin extends WELL above the torso.
+ fins.push(fin(body,[[-.60,.31],[-.30,.61],[-.10,1.46],[.19,.93],[.53,.34]],accent,.99));
+ // Second dorsal fin and ventral anal fin.
+ fins.push(fin(body,[[-1.08,.22],[-.90,.49],[-.67,.25]],accent,.94));
+ fins.push(fin(body,[[-1.12,-.22],[-.89,-.49],[-.62,-.27]],accent,.94));
+ // Pectoral fins visible beneath the body and extending into depth.
+ for(const side of [-1,1]){
+   const p=fin(body,[[.15,-.19],[-.25,-.50],[-1.07,-1.12],[-.68,-.58],[.48,-.28]],accent,.95);
+   p.position.z=side*.30;p.rotation.x=side*.24;fins.push(p);
+ }
+ // A proper forked shark tail, not a diamond-shaped fish tail.
+ tail.position.x=-1.26;
+ fins.push(fin(tail,[[.08,0],[-.40,.27],[-.92,1.18],[-.75,.35],
+   [-.51,.04],[-.80,-.92],[-.33,-.64],[-.02,-.13]],accent,.99));
+ for(let side of [-1,1]){
+   eye(body,1.38,.08,side*.255,.078);
+   for(let j=0;j<5;j++){
+     const x=.45-j*.105;
+     whisker(body,[[x,.18,side*.37],[x-.035,-.01,side*.43],[x-.06,-.18,side*.34]],0x183f7d,.018);
+   }
+ }
+ whisker(body,[[1.45,-.17,.19],[1.72,-.20,.11],[1.84,-.17,.02]],0x163c76,.018);
+}else if(type==='angel'){
+ // Tall diamond-shaped angelfish: rounded 3D torso, high dorsal and long ventral fins.
+ sphere(body,.12,0,0,.79,.91,.30,color);
+ sphere(body,.62,.02,0,.37,.48,.27,accent,.95);
+ // Dorsal and anal fins are extruded so they remain solid in three-quarter turns.
+ const dorsal=fin(body,[[-.55,.49],[-.34,1.04],[-.10,1.92],[.20,1.58],[.48,.69]],accent,.94);
+ const anal=fin(body,[[-.52,-.49],[-.23,-1.02],[.03,-1.77],[.33,-1.43],[.55,-.65]],color,.92);
+ fins.push(dorsal,anal);
+ tail.position.x=-.61;
+ const caudal=fin(tail,[[0,0],[-.42,.42],[-1.12,.92],[-.86,.18],[-1.16,-.82],[-.39,-.35]],accent,.91);
+ fins.push(caudal);
+ // Thin flowing trailing ribbons (all are part of the moving geometry).
+ for(let j=0;j<7;j++){
+  let k=j/6;
+  const top=whisker(dorsal,[[-.10+k*.34,1.03+k*.40,.10],[-.20+k*.38,1.48+k*.23,.10],[-.39+k*.45,2.0-k*.20,.10]],j%2?color:accent,.010);
+  const low=whisker(anal,[[.05+k*.28,-.85,.10],[-.09+k*.25,-1.34,.10],[-.31+k*.33,-1.84,.10]],j%2?accent:color,.010);
+ }
+ for(let j=0;j<10;j++){
+   let a=j/9;
+   whisker(tail,[[-.10,0,.15],[-.62, (a-.5)*.78,.15],[-1.05,(a-.5)*1.56,.15]],j%3?accent:color,.010);
+ }
+ // Delicate pearlescent fan rays and filigree running through both fins.
+ for(let k=0;k<13;k++){
+   const q=k/12;
+   whisker(body,[[-.32+q*.55,.54,.20],[-.20+q*.52,1.10+Math.sin(q*Math.PI)*.25,.20],
+      [-.14+q*.40,1.73+Math.sin(q*Math.PI)*.14,.20]],k%3===0?0xf4e7ff:accent,.006);
+   whisker(body,[[-.30+q*.52,-.52,.20],[-.19+q*.46,-1.03-Math.sin(q*Math.PI)*.18,.20],
+      [.02+q*.28,-1.63-Math.sin(q*Math.PI)*.12,.20]],k%3===0?0xfff2ff:color,.006);
+ }
+ // Small translucent pearl scales and two-sided gill arcs.
+ for(let row=-3;row<=3;row++)for(let k=0;k<6;k++){
+   const x=-.37+k*.17+(row%2)*.045,y=row*.19;
+   if((x/.83)**2+(y/.88)**2>.83)continue;
+   const z=.29*Math.sqrt(Math.max(.1,1-(x/.83)**2-(y/.88)**2));
+   for(let side of [-1,1])sphere(body,x,y,z*side,.026,.021,.011,
+      k%4===0?0xf8f3ff:(row%2?color:accent),.88);
+ }
+ for(let side of [-1,1]){
+   for(let j=0;j<3;j++)whisker(body,[[.51+j*.07,.35,side*.245],
+     [.57+j*.07,.03,side*.31],[.49+j*.07,-.27,side*.26]],0x2c5d9d,.012);
+ }
+ // Two extremely recognizable long ventral feelers.
+ for(let z of [-.19,.19]){
+  whisker(body,[[.57,-.40,z],[.62,-1.02,z],[.42,-1.82,z],[.20,-2.24,z]],accent,.018);
+ }
+ // Vertical body bands and luminous facial detail.
+ for(let x of [-.30,.18,.52]){
+  for(let z of [-.27,.27])whisker(body,[[x,.65,z],[x-.06,.12,z*1.13],[x-.09,-.60,z]],0x294eaa,.025);
+ }
+ for(let z of [-.28,.28]){
+  eye(body,.77,.22,z,.11);
+  whisker(body,[[.90,-.12,z*.76],[1.01,-.16,z*.57],[.99,-.20,z*.35]],0xffc4e9,.016);
+ }
+}else if(type==='jelly'){
+ sphere(body,0,.18,0,.92,.48,.92,color,.78);sphere(body,0,.0,0,.73,.19,.73,accent,.52);for(let k=0;k<16;k++){let a=k*Math.PI/8;whisker(body,[[0,.46,0],[Math.cos(a)*.58,.32,Math.sin(a)*.58],[Math.cos(a)*.83,.03,Math.sin(a)*.83]],accent,.011);}for(let j=0;j<13;j++){const a=j*2*Math.PI/13;let x=Math.cos(a)*.6,z=Math.sin(a)*.6;tube(body,[[x,0,z],[x*.96,-.35,z*.96],[x*1.2+Math.sin(j)*.13,-1.0,z*1.15],[x*.7,-1.9-(j%4)*.18,z*.9]],.014,j%3===0?accent:color,.72)}
+}else if(type==='ray'){
+ sphere(body,.18,0,0,.92,.16,.48,color);fin(body,[[-.5,0],[-.12,.21],[.3,.65],[.93,.05],[.25,-.14]],color,.9);const left=fin(body,[[-.5,0],[-.12,-.21],[.3,-.65],[.93,-.05],[.25,.14]],accent,.83);left.position.z=-.15;tube(body,[[-.7,0,0],[-1.4,0,0],[-2.7,0,0]],.025,accent);sphere(body,.7,.08,.22,.06,.06,.06,0xe0ffff);sphere(body,.7,.08,-.22,.06,.06,.06,0xe0ffff);
+}else if(type==='turtle'){
+ sphere(body,0,0,0,1,.43,.72,color);sphere(body,.07,.19,0,.84,.38,.65,accent,.8);sphere(body,1.04,.03,0,.36,.28,.30,color);sphere(body,1.20,.13,.24,.06,.06,.04,0xdfffff);eye(body,1.22,.12,-.24,.065);for(let k=0;k<9;k++){let a=k*Math.PI*2/9;sphere(body,.08+Math.cos(a)*.52,.50,Math.sin(a)*.42,.15,.024,.13,k%2?color:accent,.85);}for(const [x,z,sgn] of [[.44,.6,1],[-.52,.6,-1],[.44,-.6,1],[-.52,-.6,-1]]){const fl=sphere(body,x,-.10,z,.57,.13,.23,accent,.9);fl.rotation.y=z>0?-.4:.4;fins.push(fl)}
+}else if(type==='seahorse'){
+ sphere(body,0,.18,0,.38,.88,.28,color);sphere(body,.22,.94,0,.38,.31,.29,accent);sphere(body,.58,.89,0,.36,.13,.15,color);sphere(body,.87,.86,0,.13,.09,.11,accent);sphere(body,.32,1.04,.26,.07,.07,.04,0xeaffff);tube(body,[[0,-.5,0],[.18,-1.1,0],[.02,-1.47,0],[-.3,-1.36,0],[-.31,-1.08,0]],.10,color);fin(body,[[-.2,.52],[-.72,.91],[-.50,.12]],accent,.76);
+}else{
+ const long=type==='betta';sphere(body,.15,0,0,1.05,.55,.39,color);sphere(body,.78,-.02,0,.48,.39,.36,accent,.8);tail.position.x=-.76;fin(tail,[[0,0],[-1.15,long?1.22:.70],[-1.64,0],[-1.15,long?-1.22:-.70]],accent,.88);fin(body,[[-.47,.35],[.12,long?1.22:.92],[.62,.34]],accent,.79);fin(body,[[-.35,-.37],[.25,long?-1.08:-.70],[.68,-.28]],color,.78);sphere(body,.96,.13,.31,.087,.09,.06,0xeaffff);sphere(body,.96,.13,-.31,.087,.09,.06,0xeaffff);eye(body,.99,.13,.34,.10);eye(body,.99,.13,-.34,.10);tube(body,[[1.13,-.16,.24],[1.24,-.20,.15],[1.28,-.17,0]],.024,accent,.95);for(let j=0;j<6;j++){let x=-.52+j*.21;tube(body,[[x,-.32,.25],[x+.10,.18,.38],[x+.06,.38,.20]],.012,accent,.42)}eye(body,.99,.12,.34,.082);eye(body,.99,.12,-.34,.082);
+ // layered scale rows and fin-ray detailing give the ASCII silhouette definition
+ for(let row=-2;row<=2;row++)for(let k=0;k<8;k++){
+   let x=-.64+k*.205+(row%2)*.07,y=row*.145;
+   let z=.38*Math.sqrt(Math.max(.06,1-(x-.1)*(x-.1)/1.2-y*y/.36));
+   sphere(body,x,y,z,.045,.023,.012,k%3===0?accent:color,.85);
+ }
+ for(let k=0;k<9;k++){
+  const fy=-.72+k*.18;
+  whisker(tail,[[-.08,0,.12],[-1.20,fy,.12]],k%2?accent:color,.008);
+ }
+ for(let k=0;k<7;k++)whisker(body,[[-.25,.33,.12],[.02+k*.06,.66+(k%3)*.14,.12]],accent,.008);
+
+}return {root,body,tail,fins,type,phase:Math.random()*6.28};}
+const animals=[];function add(type,color,accent,size,x,y,z,speed,dir=1){const f=fish(type,color,accent,size);scene.add(f.root);f.root.position.set(x,y,z);f.x=x;f.y=y;f.z=z;f.speed=speed;f.dir=dir;f.root.rotation.y=dir<0?Math.PI:0;animals.push(f);}
+// Irregular, hand-spaced initial positions, not a row or column layout.
+add('shark',0xf3a34d,0xffdc8b,.98,-4.8,1.45,-.8,.30);
+add('angel',0xff8f6b,0xffd6a2,.80,1.4,3.45,-.7,.29,-1);
+add('betta',0xf66c72,0xffc38b,.79,5.35,1.80,-.3,.34);
+add('jelly',0xffb77b,0xffe3b5,.79,-1.85,-2.60,-1.2,.18);
+add('ray',0xe99b5c,0xffd0a2,.90,1.35,-.65,-1.4,.28);
+add('turtle',0xd5ba63,0x9fd08b,.77,-5.5,-2.05,-.8,.27,-1);
+add('angel',0xffb07a,0xffe7b5,.76,5.45,-2.75,.3,.27,-1);
+add('seahorse',0xff9a79,0xf8cf77,.67,-.40,1.45,-.6,.20);
+add('turtle',0x8bc18d,0xe9c36e,.76,-3.95,3.65,-1,.24);
+add('jelly',0xffa2a1,0xffd69e,.71,3.45,-4.20,-1,.16);
+
+// Persistent swim velocities: creatures actually travel across the tank.
+for(let i=0;i<animals.length;i++){
+ const f=animals[i];const a=i*2.39996+.47;
+ f.vx=Math.cos(a)*(.50+f.speed*.9);
+ f.vy=Math.sin(a)*(.28+f.speed*.38);
+ f.swimSeed=i*1.73;
+ f.heading=f.dir<0?Math.PI:0;
+}
+// Bubbles are real 3D spheres, not pasted decorations.
+const bubbles=[];for(let i=0;i<45;i++){const b=new THREE.Mesh(new THREE.SphereGeometry(1,9,7),new THREE.MeshBasicMaterial({color:i%3?0xe4a868:0xffd6a0,transparent:true,opacity:.27,wireframe:true}));b.scale.setScalar(.025+Math.random()*.052);b.position.set((Math.random()-.5)*13,(Math.random()-.5)*10,-4+Math.random()*4);scene.add(b);bubbles.push(b);}
+// Temporal echo buffers preserve real ASCII silhouettes from earlier swim poses.
+const echoes=[];let lastEcho=-1;
+const currentFrame=document.createElement('canvas');
+const currentCtx=currentFrame.getContext('2d',{alpha:true});
+const ECHO_INTERVAL=.105,ECHO_LIFETIME=1.08,ECHO_COUNT=11;
+function captureEcho(time){
+ // Convert the black-backed ASCII frame to transparent ink before storing it.
+ // Otherwise each ghost is an opaque black rectangle that hides older ghosts.
+ const c=document.createElement('canvas');
+ c.width=Math.ceil(output.width*.75);c.height=Math.ceil(output.height*.75);
+ const g=c.getContext('2d',{alpha:true,willReadFrequently:true});
+ g.drawImage(currentFrame,0,0,c.width,c.height);
+ const frame=g.getImageData(0,0,c.width,c.height);
+ const d=frame.data;
+ for(let i=0;i<d.length;i+=4){
+   const intensity=Math.max(d[i],d[i+1],d[i+2]);
+   d[i+3]=intensity<19?0:Math.min(255,Math.round((intensity-16)*2.2));
+ }
+ g.putImageData(frame,0,0);
+ echoes.push({canvas:c,time});
+ while(echoes.length>ECHO_COUNT)echoes.shift();
+}
+function paintEchoes(time){
+ ctx.save();ctx.globalCompositeOperation='screen';ctx.shadowBlur=0;
+ for(let i=0;i<echoes.length;i++){
+  const e=echoes[i],age=time-e.time;
+  if(age<0||age>ECHO_LIFETIME)continue;
+  const decay=Math.pow(1-age/ECHO_LIFETIME,1.12);
+  ctx.globalAlpha=.67*decay;
+  ctx.drawImage(e.canvas,0,0,output.width,output.height);
+ }
+ ctx.restore();
+}
+const target=document.createElement('canvas'),tc=target.getContext('2d',{willReadFrequently:true});let last=performance.now(),elapsed=0;
+function resize(){echoes.length=0;lastEcho=-1;renderer.setSize(W(),H());camera.aspect=W()/H();camera.updateProjectionMatrix();output.width=W()*Math.min(devicePixelRatio,1.6);output.height=H()*Math.min(devicePixelRatio,1.6);output.style.width=W()+'px';output.style.height=H()+'px';currentFrame.width=output.width;currentFrame.height=output.height;const cw=Math.max(130,Math.round(W()/cells)),ch=Math.max(75,Math.round(H()/cells));target.width=cw;target.height=ch;}addEventListener('resize',resize);resize();
+function animate(now){requestAnimationFrame(animate);let dt=Math.min(.04,(now-last)/1000);last=now;if(playing)elapsed+=dt;t=elapsed;
+// Continuous swimming with boundary steering and soft separation.
+for(const f of animals){
+ const u=t*(.55+f.speed*1.2)+f.phase;
+ const steerX=Math.sin(t*.37+f.swimSeed)*.16+Math.sin(t*.13+f.phase)*.10;
+ const steerY=Math.cos(t*.43+f.swimSeed)*.13;
+ let ax=steerX,ay=steerY;
+ const x=f.root.position.x,y=f.root.position.y;
+ const visibleHalfY=Math.tan(THREE.MathUtils.degToRad(camera.fov*.5))*(camera.position.z-f.root.position.z);
+ const visibleHalfX=visibleHalfY*camera.aspect;
+ const limX=Math.max(2.4,visibleHalfX-2.25),limY=Math.max(1.8,visibleHalfY-1.55);
+ if(x>limX)ax-=.8+(x-limX)*.8;
+ if(x< -limX)ax+=.8+(-limX-x)*.8;
+ if(y>limY)ay-=.65+(y-limY)*.7;
+ if(y< -limY)ay+=.65+(-limY-y)*.7;
+ // Avoid swimming through other creatures; use a gentle repulsive field.
+ for(const o of animals){
+   if(o===f)continue;
+   const ox=(x+f.vx*.85)-(o.root.position.x+o.vx*.85),
+         oy=(y+f.vy*.85)-(o.root.position.y+o.vy*.85);
+   const d2=ox*ox+oy*oy;
+   const spacing=(f.type==='shark'||o.type==='shark')?3.45:
+     (f.type==='angel'||o.type==='angel')?3.0:2.55;
+   if(d2<spacing*spacing && d2>.0001){
+     const d=Math.sqrt(d2),rep=(spacing-d)*1.45;
+     ax+=ox/d*rep;ay+=oy/d*rep;
+   }
+ }
+ f.vx+=ax*dt;f.vy+=ay*dt;
+ const speed=Math.hypot(f.vx,f.vy)||1;
+ const targetSpeed=f.type==='jelly'?.31:(.54+f.speed*.75);
+ const blend=Math.min(1,dt*.65);
+ f.vx+=(f.vx/speed*targetSpeed-f.vx)*blend;
+ f.vy+=(f.vy/speed*targetSpeed-f.vy)*blend;
+ f.root.position.x+=f.vx*dt;
+ f.root.position.y+=f.vy*dt;
+ f.root.position.z=f.z+Math.sin(t*.38+f.swimSeed)*.45;
+ // Gently bank in 3D while remaining legible broadside.
+ const desired=f.vx<0?Math.PI:0;
+ const diff=Math.atan2(Math.sin(desired-f.heading),Math.cos(desired-f.heading));
+ f.heading+=Math.max(-dt*.70,Math.min(dt*.70,diff));
+ f.root.rotation.y=f.heading+Math.sin(u*.6)*.10;
+ f.root.rotation.z=Math.max(-.20,Math.min(.20,f.vy*.18));
+ f.root.rotation.x=Math.sin(u*.48)*.10;
+ f.body.rotation.y=Math.sin(t*(3.5+f.speed*5)+f.phase)*.075;
+ if(f.tail)f.tail.rotation.y=Math.sin(t*(5.4+f.speed*6)+f.phase)*(f.type==='angel'?.43:f.type==='shark'?.52:.75);
+ if(f.type==='angel'){
+   f.body.rotation.z=Math.sin(t*1.65+f.phase)*.055;
+   f.root.rotation.x+=Math.sin(t*1.2+f.phase)*.055;
+ }
+ if(f.type==='jelly'){const p=1+Math.sin(t*2.6+f.phase)*.11;f.body.scale.set(p,1/p,p);}
+ for(let j=0;j<f.fins.length;j++)f.fins[j].rotation.z=Math.sin(t*(f.type==='angel'?1.7:4.4)+f.phase+j*1.4)*(f.type==='angel'?.16:.34);
+}
+for(let i=0;i<bubbles.length;i++){let b=bubbles[i];if(playing)b.position.y+=dt*(.14+(i%7)*.036);if(b.position.y>5.5)b.position.y=-5.5;}
+camera.position.x=mouse.x*.28;camera.position.y=mouse.y*.18;camera.lookAt(0,0,0);
+renderer.render(scene,camera);
+// Read the real shaded 3D render and convert every cell to an animated ASCII glyph.
+// Thus the glyphs ARE the animal surfaces; they are not separate floating stickers.
+tc.drawImage(renderer.domElement,0,0,target.width,target.height);const img=tc.getImageData(0,0,target.width,target.height).data;const sx=output.width/target.width,sy=output.height/target.height;ctx.fillStyle='#000';ctx.fillRect(0,0,output.width,output.height);ctx.textAlign='center';ctx.textBaseline='middle';ctx.font=`bold ${Math.ceil(sy*1.16)}px Menlo,Consolas,monospace`;
+// Shape-aware ASCII: the contour is drawn with brighter, denser characters;
+ // interior characters are lighter and less uniform, like the ASCII lilies reference.
+ const iw=target.width,ih=target.height;
+ const pix=(xx,yy)=>{if(xx<0||yy<0||xx>=iw||yy>=ih)return 0;
+   const ii=(yy*iw+xx)*4;return Math.max(img[ii],img[ii+1],img[ii+2]);};
+ for(let y=0;y<ih;y++)for(let x=0;x<iw;x++){
+  const i=(y*iw+x)*4,r=img[i],g=img[i+1],b=img[i+2],peak=Math.max(r,g,b);
+  if(peak<17)continue;
+  const n1=pix(x-1,y),n2=pix(x+1,y),n3=pix(x,y-1),n4=pix(x,y+1);
+  const edge=Math.max(0,peak-Math.min(n1,n2,n3,n4));
+  const contour=edge>42 || Math.min(n1,n2,n3,n4)<19;
+  const lum=(r*.24+g*.60+b*.16)/255;
+  const grain=Math.sin(x*1.73+y*2.37+t*2.5)*.048;
+  const v=clamp(lum*.94+grain+(contour?.22:0),0,.999);
+  let glyph=chars[Math.floor(v*(chars.length-1))];
+  if(contour)glyph='@#%*+ox'[Math.floor((x*3+y*5)%7)];
+  else if(((x*13+y*37)%83)<3 && v>.32)glyph=special[(x+y+Math.floor(t*4))%special.length];
+  const alpha=contour?1:clamp((peak-15)/105,.48,.96);
+  const boost=contour?1.43:1.23;
+  ctx.fillStyle=`rgba(${Math.min(255,Math.round(r*boost+12))},${Math.min(255,Math.round(g*boost+10))},${Math.min(255,Math.round(b*boost+15))},${alpha})`;
+  if(glowing){ctx.shadowColor=`rgb(${r},${g},${b})`;ctx.shadowBlur=contour?sy*.78:sy*.36;}
+  ctx.fillText(glyph,(x+.5)*sx,(y+.52)*sy);
+ }
+ctx.shadowBlur=0;
+// Keep a clean copy of the current ASCII animals. Older silhouettes appear BEHIND
+// them, so the current creatures stay crisp instead of getting washed out.
+currentCtx.clearRect(0,0,currentFrame.width,currentFrame.height);
+currentCtx.drawImage(output,0,0);
+if(playing && (lastEcho<0||t-lastEcho>=ECHO_INTERVAL)){
+ captureEcho(t);lastEcho=t;
+}
+ctx.fillStyle='#000';ctx.fillRect(0,0,output.width,output.height);
+paintEchoes(t);
+ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+ctx.drawImage(currentFrame,0,0);
+// Ghost silhouettes are sampled from real previous ASCII frames rather than
+// arbitrary floating symbols. Each fin flap leaves a brief luminous afterimage.
+}
+requestAnimationFrame(animate);addEventListener('pointermove',e=>{mouse.x=(e.clientX/W()-.5)*2;mouse.y=(.5-e.clientY/H())*2;});function density(){cells=cells===4.0?3.3:cells===3.3?5.1:4.0;resize();}function glow(){glowing=!glowing;}function pause(){playing=!playing;}addEventListener('keydown',e=>{if(e.key.toLowerCase()==='a')density();if(e.key.toLowerCase()==='g')glow();if(e.code==='Space'){e.preventDefault();pause();}});
+</script></body></html>
